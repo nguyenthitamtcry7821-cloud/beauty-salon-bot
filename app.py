@@ -1,12 +1,22 @@
 # app.py
-from fastapi import FastAPI, Query
+import os
+import json
+from fastapi import FastAPI, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
-from notion_db import get_catalog, booked_slots
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+from telebot import types
 import uvicorn
+from dotenv import load_dotenv
+
+# Импорты
+from notion_db import get_catalog, booked_slots, save_booking, auto_close_past_bookings
+from main import bot 
+
+load_dotenv()
 
 app = FastAPI(title="Beauty Salon API")
 
-# Настройка CORS для работы с Telegram Mini App
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -14,22 +24,40 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.get("/")
+async def root():
+    return FileResponse("webapp/index.html")
+
 @app.get("/api/catalog")
 async def fetch_catalog():
-    """Возвращает каталог услуг из Notion."""
-    try:
-        return get_catalog()
-    except Exception as e:
-        return {"error": str(e), "categories": []}
+    return get_catalog()
 
 @app.get("/api/slots")
 async def fetch_slots(date: str = Query(...), master: str = Query("Любой")):
-    """Возвращает список занятых слотов из Notion."""
-    try:
-        busy = list(booked_slots(date, master))
-        return {"busy": busy}
-    except Exception as e:
-        return {"busy": [], "error": str(e)}
+    busy = list(booked_slots(date, master))
+    return {"busy": busy}
+
+@app.post("/api/book")
+async def book_service(request: Request):
+    data = await request.json()
+    booking_id = save_booking(data)
+    
+    msg = f"✅ *Запись подтверждена!*\n\nУслуга: {data['service']}\nДата: {data['date']} в {data['time']}"
+    bot.send_message(data['chat_id'], msg, parse_mode="Markdown")
+    
+    return {"success": True, "booking_id": booking_id}
+
+@app.post("/webhook")
+async def telegram_webhook(request: Request):
+    if request.headers.get('content-type') == 'application/json':
+        json_string = await request.body()
+        update = types.Update.de_json(json_string.decode('utf-8'))
+        bot.process_new_updates([update])
+        return {"status": "ok"}
+    return {"status": "error"}
+
+app.mount("/", StaticFiles(directory="webapp", html=True), name="webapp")
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
