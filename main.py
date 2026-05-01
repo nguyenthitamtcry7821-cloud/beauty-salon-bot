@@ -5,6 +5,9 @@ import logging
 import os
 from telebot import types
 from telebot.types import MenuButtonWebApp, WebAppInfo
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # --- CONFIG FROM ENVIRONMENT ---
 API_TOKEN = os.environ.get('API_TOKEN')
