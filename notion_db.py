@@ -83,7 +83,13 @@ def save_booking(data: dict, page_id=None) -> str:
     
     r = np(page_id, {"properties": props}) if page_id else \
         nc({"parent": {"database_id": DATABASE_ID}, "properties": props})
-    return r.get("id", "")
+    new_id = r.get("id", "")
+    if new_id and not page_id:  # only on new booking, not reschedule
+        try:
+            update_client_visits(data.get("phone", ""), data.get("name", ""))
+        except Exception as _ce:
+            logger.error(f"client_visits err: {_ce}")
+    return new_id
 
 def get_catalog() -> dict:
     catalog = {"categories": []}
@@ -115,3 +121,57 @@ def auto_close_past_bookings():
             if appt_dt + timedelta(hours=1) < now:
                 update_booking_status(page["id"], "Завершено")
         except: pass
+
+
+# --- Clients DB helpers ---
+def _nq_clients(payload: dict) -> list:
+    cdb = os.environ.get("CLIENTS_DB_ID", "")
+    if not cdb:
+        return []
+    return _nreq(
+        "POST",
+        f"https://api.notion.com/v1/databases/{cdb}/query",
+        json=payload
+    ).get("results", [])
+
+def _nc_clients(payload: dict) -> dict:
+    cdb = os.environ.get("CLIENTS_DB_ID", "")
+    if not cdb:
+        return {}
+    full_payload = {"parent": {"database_id": cdb}}
+    full_payload.update(payload)
+    return _nreq("POST", "https://api.notion.com/v1/pages", json=full_payload)
+
+def update_client_visits(phone: str, name: str):
+    try:
+        prop_phone = '\u0422\u0435\u043b\u0435\u0444\u043e\u043d'
+        prop_name  = '\u0418\u043c\u044f'
+        prop_vis   = '\u0412\u0438\u0437\u0438\u0442\u044b'
+        results = _nq_clients({'filter': {'property': prop_phone, 'phone_number': {'equals': phone}}})
+        if results:
+            pid = results[0]['id']
+            cur = results[0]['properties'].get(prop_vis, {}).get('number') or 0
+            _nreq('PATCH', f'https://api.notion.com/v1/pages/{pid}',
+                  json={'properties': {prop_vis: {'number': cur + 1}}})
+            logger.info(f'Client {phone}: visits {cur} -> {cur + 1}')
+        else:
+            _nc_clients({'properties': {
+                prop_name:  {'title':        [{'text': {'content': name}}]},
+                prop_phone: {'phone_number': phone},
+                prop_vis:   {'number':       1},
+            }})
+            logger.info(f'New client created: {name} {phone}')
+    except Exception as e:
+        logger.error(f'update_client_visits error: {e}')
+
+
+def today_bookings() -> list:
+    from datetime import date as _d
+    ds = _d.today().strftime('%Y-%m-%d')
+    prop_date   = '\u0414\u0430\u0442\u0430 \u0437\u0430\u043f\u0438\u0441\u0438'
+    prop_status = '\u0421\u0442\u0430\u0442\u0443\u0441'
+    prop_val    = '\u0417\u0430\u043f\u043b\u0430\u043d\u0438\u0440\u043e\u0432\u0430\u043d\u043e'
+    return nq({'filter': {'and': [
+        {'property': prop_date,   'date':   {'equals': ds}},
+        {'property': prop_status, 'select': {'equals': prop_val}},
+    ]}})

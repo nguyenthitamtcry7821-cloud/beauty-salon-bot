@@ -92,3 +92,35 @@ def cb_admin_status(call):
         bot.edit_message_text(f"{call.message.text}\n\n{icon} *Статус: {status}*", 
                               call.message.chat.id, call.message.message_id, parse_mode="Markdown")
     bot.answer_callback_query(call.id)
+
+
+@bot.callback_query_handler(func=lambda c: c.data.startswith("ADM|"))
+def cb_adm(call):
+    cid = call.message.chat.id
+    if cid not in ADMIN_IDS:
+        return bot.answer_callback_query(call.id, "No access.")
+    action = call.data.split("|")[1]
+    if action == "stats":
+        from datetime import date as _td
+        ds = _td.today().strftime("%d.%m.%Y")
+        pages = today_bookings()
+        if not pages:
+            text = f"* ({ds}):*\n\n."
+        else:
+            prop_time    = '\u0412\u0440\u0435\u043c\u044f'
+            prop_service = '\u0423\u0441\u043b\u0443\u0433\u0430'
+            prop_master  = '\u041c\u0430\u0441\u0442\u0435\u0440'
+            prop_client  = '\u041a\u043b\u0438\u0435\u043d\u0442'
+            lines = [f"* ({ds}):*\n"]
+            for page in pages:
+                p = page["properties"]
+                try:
+                    t   = p[prop_time]["rich_text"][0]["text"]["content"]
+                    svc = p[prop_service]["select"]["name"]
+                    mst = p[prop_master]["select"]["name"]
+                    cli = p[prop_client]["title"][0]["text"]["content"]
+                    lines.append(f"- {t} | {cli} | {svc} ({mst})")
+                except: pass
+            text = "\n".join(lines)
+        bot.edit_message_text(text, cid, call.message.message_id, parse_mode="Markdown")
+        bot.answer_callback_query(call.id)
