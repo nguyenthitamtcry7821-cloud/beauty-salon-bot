@@ -4,7 +4,7 @@ import requests
 import time
 import logging
 import json
-from config import SPECIALIZATIONS, PRICES, LOYALTY
+from config import SPECIALIZATIONS, PRICES
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
