@@ -92,13 +92,11 @@ def save_booking(data: dict, page_id=None) -> str:
     return new_id
 
 def get_catalog() -> dict:
-    catalog = {"categories": []}
-    for cat_name, cat_data in SPECIALIZATIONS.items():
-        services = []
-        for svc in cat_data["services"]:
-            services.append({"name": svc, "price": PRICES.get(svc, 0)})
-        catalog["categories"].append({"name": cat_name, "services": services})
-    return catalog
+    return {"categories": [
+        {"name": "💇‍♀️ Волосы", "services": [{"name": "Стрижка", "price": 1500}, {"name": "Окрашивание", "price": 4000}]},
+        {"name": "💅 Ногти", "services": [{"name": "Маникюр", "price": 1200}, {"name": "Педикюр", "price": 1400}]},
+        {"name": "💆‍♀️ Косметология", "services": [{"name": "Чистка лица", "price": 2500}, {"name": "Пилинг", "price": 2000}]}
+    ]}
 
 def auto_close_past_bookings():
     from datetime import datetime, timedelta
