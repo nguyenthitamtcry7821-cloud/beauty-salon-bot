@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from telebot import types
+from telebot.types import MenuButtonWebApp, WebAppInfo
 import uvicorn
 from dotenv import load_dotenv
 
@@ -34,6 +35,7 @@ async def startup_event():
     if webhook_url:
         bot.remove_webhook()
         bot.set_webhook(url=f"{webhook_url}/webhook")
+        bot.set_chat_menu_button(menu_button=MenuButtonWebApp(type="web_app", text="🚀 Записаться", web_app=WebAppInfo(url=webhook_url)))
         print(f"✅ Webhook: {webhook_url}/webhook")
 
 app.add_middleware(
