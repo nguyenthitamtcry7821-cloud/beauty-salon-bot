@@ -43,10 +43,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.get("/")
-async def root():
-    return FileResponse("webapp/index.html")
-
 @app.get("/api/catalog")
 async def fetch_catalog():
     return get_catalog()
