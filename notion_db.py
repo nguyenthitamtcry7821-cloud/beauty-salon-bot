@@ -4,6 +4,7 @@ import requests
 import time
 import logging
 import json
+from config import SPECIALIZATIONS, PRICES, LOYALTY
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -12,21 +13,6 @@ logger = logging.getLogger(__name__)
 # --- CONFIG FROM ENVIRONMENT ---
 NOTION_TOKEN = os.environ.get('NOTION_TOKEN')
 DATABASE_ID = os.environ.get('DATABASE_ID')
-
-# Программа лояльности (визиты: скидка %)
-try:
-    LOYALTY_RAW = os.environ.get('LOYALTY', '{ "3": 5, "5": 10, "10": 15 }')
-    LOYALTY = {int(k): v for k, v in json.loads(LOYALTY_RAW).items()}
-except Exception as e:
-    logger.warning(f"Error parsing LOYALTY env: {e}. Using defaults.")
-    LOYALTY = {3: 5, 5: 10, 10: 15}
-
-# Прайс-лист
-try:
-    PRICES = json.loads(os.environ.get('PRICES', '{}'))
-except Exception as e:
-    logger.warning(f"Error parsing PRICES env: {e}. Using empty dict.")
-    PRICES = {}
 
 # Заголовки для авторизации в Notion
 NH = {
@@ -100,27 +86,19 @@ def save_booking(data: dict, page_id=None) -> str:
     return r.get("id", "")
 
 def get_catalog() -> dict:
-    results = nq({})
-    categories_map = {}
-    for page in results:
-        props = page.get("properties", {})
-        name = ""
-        if "Услуга" in props and props["Услуга"].get("select"):
-            name = props["Услуга"]["select"]["name"]
-        if not name: continue
-        
-        price = props.get("Цена", {}).get("number") or 0
-        category = "Прочее"
-        if "Категория" in props and props["Категория"].get("select"):
-            category = props["Категория"]["select"]["name"]
-
-        if category not in categories_map: categories_map[category] = []
-        if not any(s["name"] == name for s in categories_map[category]):
-            categories_map[category].append({"name": name, "price": price})
-
     catalog = {"categories": []}
-    for cat_name, services in categories_map.items():
-        catalog["categories"].append({"name": cat_name, "services": services})
+    for cat_name, info in SPECIALIZATIONS.items():
+        services = []
+        for sname in info["services"]:
+            services.append({
+                "name": sname,
+                "price": PRICES.get(sname, 0)
+            })
+        catalog["categories"].append({
+            "name": cat_name,
+            "services": services,
+            "masters": info["masters"]
+        })
     return catalog
 
 def auto_close_past_bookings():
