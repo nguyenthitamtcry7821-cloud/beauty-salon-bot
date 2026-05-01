@@ -1,0 +1,13 @@
+﻿=== PATCH notion_db.py ===
+[+] import os
+[+] update_client_visits + helpers added
+[+] update_client_visits call injected into save_booking
+[+] today_bookings added
+[OK] notion_db.py saved
+
+=== PATCH main.py ===
+[+] today_bookings imported
+[+] cb_adm handler added before __main__
+[OK] main.py saved
+
+=== ALL DONE ===

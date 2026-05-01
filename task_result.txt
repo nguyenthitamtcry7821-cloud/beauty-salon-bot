@@ -1,0 +1,23 @@
+﻿============================================================
+╟└─└╫└ 1: ┴рчр л╩ышхэЄ√╗
+============================================================
+[OK] ┴рчр л╩ышхэЄ√╗ ёючфрэр: 35152d18-dc45-8190-bcd2-f0cf29c22089
+[OK] CLIENTS_DB_ID=35152d18-dc45-8190-bcd2-f0cf29c22089 фюсртыхэ т .env
+
+============================================================
+╟└─└╫└ 2: ╧рЄў notion_db.py
+============================================================
+[OK] ─юсртыхэ import os
+[OK] ═ют√х ЇєэъЎшш тёЄртыхэ√ яхЁхф get_busy_slots
+[OK] ┬√чют update_client_visits фюсртыхэ т save_booking
+python : Traceback (most recent call last):
+строка:1 знак:1
++ python do_tasks.py 2>&1 | Out-File -FilePath "task_result.txt" -Encod ...
++ ~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Traceback (most recent call last)::String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  File "C:\Users\Orchestrator\Desktop\Beauty BOT\do_tasks.py", line 224, in <module>
+    open(notion_path, "w", encoding=ENC).write(content)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^
+UnicodeEncodeError: 'latin-1' codec can't encode characters in position 5694-5702: ordinal not in range(256)

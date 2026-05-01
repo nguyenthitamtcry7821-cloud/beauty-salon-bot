@@ -1,0 +1,5 @@
+pyTelegramBotAPI
+fastapi
+uvicorn
+python-dotenv
+requests

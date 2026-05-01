@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Beauty Salon Booking</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        :root {
+            --bg-color: var(--tg-theme-bg-color, #ffffff);
+            --text-color: var(--tg-theme-text-color, #000000);
+            --hint-color: var(--tg-theme-hint-color, #999999);
+            --button-color: var(--tg-theme-button-color, #2481cc);
+            --button-text-color: var(--tg-theme-button-text-color, #ffffff);
+            --secondary-bg-color: var(--tg-theme-secondary-bg-color, #f4f4f5);
+        }
+
+        body {
+            font-family: -apple-system, system-ui, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0; padding: 16px;
+            display: flex; flex-direction: column; gap: 16px;
+        }
+
+        .section-title {
+            font-size: 13px; font-weight: 600; text-transform: uppercase;
+            color: var(--hint-color); margin: 10px 0 8px 4px;
+        }
+
+        .service-item {
+            background-color: var(--secondary-bg-color);
+            padding: 12px; border-radius: 12px; margin-bottom: 6px;
+            cursor: pointer; display: flex; justify-content: space-between;
+            border: 2px solid transparent; transition: 0.2s;
+        }
+        .service-item.selected {
+            border-color: var(--button-color);
+            background-color: var(--bg-color);
+        }
+        .service-price { font-weight: 600; color: var(--button-color); }
+
+        .booking-details {
+            display: none; flex-direction: column; gap: 12px;
+            padding-top: 10px; border-top: 1px solid var(--secondary-bg-color);
+        }
+        input, select {
+            appearance: none; background-color: var(--secondary-bg-color);
+            border: none; border-radius: 12px; color: var(--text-color);
+            font-size: 16px; padding: 12px; width: 100%; outline: none;
+            box-sizing: border-box;
+        }
+        select:disabled { opacity: 0.5; }
+
+        .btn-main {
+            background-color: var(--button-color); color: var(--button-text-color);
+            border: none; border-radius: 12px; font-size: 16px; font-weight: 600;
+            padding: 16px; cursor: pointer; width: 100%; margin-top: 20px;
+            transition: opacity 0.2s;
+        }
+        .btn-main:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        .loading { text-align: center; color: var(--hint-color); margin-top: 40px; }
+    </style>
+</head>
+<body>
+    <div id="catalog-section">
+        <div class="section-title">Выберите услугу</div>
+        <div id="catalog"><div class="loading">Загрузка каталога...</div></div>
+    </div>
+
+    <div id="booking-section" class="booking-details">
+        <div>
+            <div class="section-title">Дата визита</div>
+            <input type="date" id="date-picker">
+        </div>
+        <div>
+            <div class="section-title">Время визита</div>
+            <select id="time-picker" disabled>
+                <option value="" disabled selected>Сначала выберите дату</option>
+            </select>
+        </div>
+        <button class="btn-main" id="book-btn" disabled>Записаться</button>
+    </div>
+
+    <script>
+        const tg = window.Telegram.WebApp;
+        tg.expand();
+        tg.ready();
+
+        const API_BASE = '/api';
+        const ALL_SLOTS = ["10:00","11:00","12:00","13:00","14:00","15:00","16:00","17:00"];
+        
+        let state = { service: null, date: null, time: null };
+
+        const catalogEl = document.getElementById('catalog');
+        const bookingSection = document.getElementById('booking-section');
+        const datePicker = document.getElementById('date-picker');
+        const timePicker = document.getElementById('time-picker');
+        const bookBtn = document.getElementById('book-btn');
+
+        datePicker.min = new Date().toISOString().split('T')[0];
+
+        async function loadCatalog() {
+            try {
+                const response = await fetch(`${API_BASE}/catalog`);
+                const data = await response.json();
+                renderCatalog(data.categories);
+            } catch (e) {
+                catalogEl.innerHTML = '<div class="loading">Ошибка загрузки каталога.</div>';
+            }
+        }
+
+        function renderCatalog(categories) {
+            catalogEl.innerHTML = '';
+            categories.forEach(cat => {
+                const title = document.createElement('div');
+                title.className = 'section-title';
+                title.style.color = 'var(--button-color)';
+                title.textContent = cat.name;
+                catalogEl.appendChild(title);
+
+                cat.services.forEach(svc => {
+                    const item = document.createElement('div');
+                    item.className = 'service-item';
+                    item.innerHTML = `<span>${svc.name}</span><span class="service-price">${svc.price} ₽</span>`;
+                    item.onclick = () => selectService(svc.name, item);
+                    catalogEl.appendChild(item);
+                });
+            });
+        }
+
+        function selectService(name, el) {
+            document.querySelectorAll('.service-item').forEach(i => i.classList.remove('selected'));
+            el.classList.add('selected');
+            state.service = name;
+            bookingSection.style.display = 'flex';
+            validate();
+        }
+
+        async function updateSlots() {
+            const date = datePicker.value;
+            if (!date) return;
+            
+            state.date = date;
+            timePicker.disabled = true;
+            timePicker.innerHTML = '<option disabled selected>Загрузка...</option>';
+            
+            try {
+                const response = await fetch(`${API_BASE}/slots?date=${date}&master=Любой`);
+                const { busy } = await response.json();
+                
+                timePicker.innerHTML = '<option value="" disabled selected>Выберите время</option>';
+                ALL_SLOTS.forEach(slot => {
+                    const isBusy = busy.includes(slot);
+                    const opt = document.createElement('option');
+                    opt.value = slot;
+                    opt.textContent = isBusy ? `${slot} (занято)` : slot;
+                    opt.disabled = isBusy;
+                    timePicker.appendChild(opt);
+                });
+                timePicker.disabled = false;
+            } catch (e) {
+                timePicker.innerHTML = '<option disabled selected>Ошибка слотов</option>';
+            }
+            validate();
+        }
+
+        function validate() {
+            state.date = datePicker.value;
+            state.time = timePicker.value;
+            bookBtn.disabled = !(state.service && state.date && state.time);
+        }
+
+        datePicker.onchange = updateSlots;
+        timePicker.onchange = validate;
+
+        bookBtn.onclick = () => {
+            if (bookBtn.disabled) return;
+            tg.sendData(JSON.stringify({
+                service: state.service,
+                master: "Любой",
+                date: state.date,
+                time: state.time
+            }));
+            tg.close();
+        };
+
+        loadCatalog();
+    </script>
+</body>
+</html>

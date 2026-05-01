@@ -1,0 +1,652 @@
+﻿=== notion_db.py (5706 chars) ===
+# notion_db.py
+import requests
+import time
+import logging
+from config import NOTION_TOKEN, DATABASE_ID, LOYALTY
+
+# ├Р┬Э├Р┬░├С┬Б├С┬В├С┬А├Р┬╛├Р┬╣├Р┬║├Р┬░ ├Р┬╗├Р┬╛├Р┬│├Р┬╕├С┬А├Р┬╛├Р┬▓├Р┬░├Р┬╜├Р┬╕├С┬П
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# ├Р┬Ч├Р┬░├Р┬│├Р┬╛├Р┬╗├Р┬╛├Р┬▓├Р┬║├Р┬╕ ├Р┬┤├Р┬╗├С┬П ├Р┬░├Р┬▓├С┬В├Р┬╛├С┬А├Р┬╕├Р┬╖├Р┬░├С┬Ж├Р┬╕├Р┬╕ ├Р┬▓ Notion
+NH = {
+    "Authorization":  f"Bearer {NOTION_TOKEN}",
+    "Content-Type":   "application/json",
+    "Notion-Version": "2022-06-28",
+}
+
+def _nreq(method: str, url: str, **kw) -> dict:
+    for i in range(3):
+        try:
+            return requests.request(method, url, headers=NH, timeout=10, **kw).json()
+        except requests.exceptions.ConnectionError:
+            if i == 2: return {}
+            time.sleep(1.5)
+    return {}
+
+def nq(payload: dict) -> list:
+    return _nreq("POST", f"https://api.notion.com/v1/databases/{DATABASE_ID}/query", json=payload).get("results", [])
+
+def ng(pid: str) -> dict:
+    return _nreq("GET", f"https://api.notion.com/v1/pages/{pid}")
+
+def np(pid: str, payload: dict) -> dict:
+    return _nreq("PATCH", f"https://api.notion.com/v1/pages/{pid}", json=payload)
+
+def nc(payload: dict) -> dict:
+    return _nreq("POST", "https://api.notion.com/v1/pages", json=payload)
+
+def active_bookings(cid) -> list:
+    return nq({"filter": {"and": [
+        {"property": "Chat ID", "rich_text": {"equals": str(cid)}},
+        {"property": "├Р┬б├С┬В├Р┬░├С┬В├С┬Г├С┬Б",  "select":    {"equals": "├Р┬Ч├Р┬░├Р┬┐├Р┬╗├Р┬░├Р┬╜├Р┬╕├С┬А├Р┬╛├Р┬▓├Р┬░├Р┬╜├Р┬╛"}},
+    ]}})
+
+def booked_slots(date_str: str, master: str) -> set:
+    out = set()
+    for page in nq({"filter": {"and": [
+        {"property": "├Р┬Ф├Р┬░├С┬В├Р┬░ ├Р┬╖├Р┬░├Р┬┐├Р┬╕├С┬Б├Р┬╕", "date":   {"equals": date_str}},
+        {"property": "├Р┬Ь├Р┬░├С┬Б├С┬В├Р┬╡├С┬А",      "select": {"equals": master}},
+        {"property": "├Р┬б├С┬В├Р┬░├С┬В├С┬Г├С┬Б",      "select": {"equals": "├Р┬Ч├Р┬░├Р┬┐├Р┬╗├Р┬░├Р┬╜├Р┬╕├С┬А├Р┬╛├Р┬▓├Р┬░├Р┬╜├Р┬╛"}},
+    ]}}):
+        try: out.add(page["properties"]["├Р┬Т├С┬А├Р┬╡├Р┬╝├С┬П"]["rich_text"][0]["text"]["content"])
+        except: pass
+    return out
+
+def visits_done(cid) -> int:
+    return len(nq({"filter": {"and": [
+        {"property": "Chat ID", "rich_text": {"equals": str(cid)}},
+        {"property": "├Р┬б├С┬В├Р┬░├С┬В├С┬Г├С┬Б",  "select":    {"equals": "├Р┬Ч├Р┬░├Р┬▓├Р┬╡├С┬А├С┬И├Р┬╡├Р┬╜├Р┬░"}},
+    ]}}))
+
+def discount(cid) -> int:
+    v, d = visits_done(cid), 0
+    for t, pct in sorted(LOYALTY.items()):
+        if v >= t: d = pct
+    return d
+
+def update_booking_status(page_id: str, new_status: str) -> bool:
+    try:
+        payload = {"properties": {"├Р┬б├С┬В├Р┬░├С┬В├С┬Г├С┬Б": {"select": {"name": new_status}}}}
+        r = np(page_id, payload)
+        if "id" in r:
+            logger.info(f"├Р┬б├С┬В├Р┬░├С┬В├С┬Г├С┬Б ├Р┬╖├Р┬░├Р┬┐├Р┬╕├С┬Б├Р┬╕ {page_id} ├Р┬╕├Р┬╖├Р┬╝├Р┬╡├Р┬╜├Р┬╡├Р┬╜ ├Р┬╜├Р┬░ {new_status}")
+            return True
+        else:
+            logger.error(f"├Р┬Ю├С┬И├Р┬╕├Р┬▒├Р┬║├Р┬░ Notion API ├Р┬┐├С┬А├Р┬╕ ├Р┬╛├Р┬▒├Р┬╜├Р┬╛├Р┬▓├Р┬╗├Р┬╡├Р┬╜├Р┬╕├Р┬╕ ├С┬Б├С┬В├Р┬░├С┬В├С┬Г├С┬Б├Р┬░ {page_id}: {r}")
+            return False
+    except Exception as e:
+        logger.error(f"├Р┬Ш├С┬Б├Р┬║├Р┬╗├С┬О├С┬З├Р┬╡├Р┬╜├Р┬╕├Р┬╡ ├Р┬┐├С┬А├Р┬╕ ├Р┬╛├Р┬▒├Р┬╜├Р┬╛├Р┬▓├Р┬╗├Р┬╡├Р┬╜├Р┬╕├Р┬╕ ├С┬Б├С┬В├Р┬░├С┬В├С┬Г├С┬Б├Р┬░ {page_id}: {e}")
+        return False
+
+def auto_close_past_bookings():
+    """├Р┬Э├Р┬░├С┬Е├Р┬╛├Р┬┤├Р┬╕├С┬В ├Р┬┐├С┬А├Р┬╛├С┬И├Р┬╡├Р┬┤├С┬И├Р┬╕├Р┬╡ ├Р┬╖├Р┬░├Р┬┐├Р┬╕├С┬Б├Р┬╕ ├Р┬╕ ├Р┬╖├Р┬░├Р┬║├С┬А├С┬Л├Р┬▓├Р┬░├Р┬╡├С┬В ├Р┬╕├С┬Е (├С┬Б├С┬В├Р┬░├С┬В├С┬Г├С┬Б '├Р┬Ч├Р┬░├Р┬▓├Р┬╡├С┬А├С┬И├Р┬╡├Р┬╜├Р┬╛')"""
+    from datetime import datetime, timedelta
+    now = datetime.now()
+    ds = now.strftime("%Y-%m-%d")
+    
+    # ├Р┬д├Р┬╕├Р┬╗├С┬М├С┬В├С┬А: ├С┬Б├С┬В├Р┬░├С┬В├С┬Г├С┬Б '├Р┬Ч├Р┬░├Р┬┐├Р┬╗├Р┬░├Р┬╜├Р┬╕├С┬А├Р┬╛├Р┬▓├Р┬░├Р┬╜├Р┬╛' ├Р┬╕ ├Р┬┤├Р┬░├С┬В├Р┬░ ├С┬Б├Р┬╡├Р┬│├Р┬╛├Р┬┤├Р┬╜├С┬П ├Р┬╕├Р┬╗├Р┬╕ ├С┬А├Р┬░├Р┬╜├С┬М├С┬И├Р┬╡
+    query = {
+        "filter": {
+            "and": [
+                {"property": "├Р┬б├С┬В├Р┬░├С┬В├С┬Г├С┬Б", "select": {"equals": "├Р┬Ч├Р┬░├Р┬┐├Р┬╗├Р┬░├Р┬╜├Р┬╕├С┬А├Р┬╛├Р┬▓├Р┬░├Р┬╜├Р┬╛"}},
+                {"property": "├Р┬Ф├Р┬░├С┬В├Р┬░ ├Р┬╖├Р┬░├Р┬┐├Р┬╕├С┬Б├Р┬╕", "date": {"on_or_before": ds}}
+            ]
+        }
+    }
+    
+    try:
+        results = nq(query)
+        for page in results:
+            pid = page["id"]
+            p = page["properties"]
+            try:
+                p_date = p["├Р┬Ф├Р┬░├С┬В├Р┬░ ├Р┬╖├Р┬░├Р┬┐├Р┬╕├С┬Б├Р┬╕"]["date"]["start"]
+                p_time = p["├Р┬Т├С┬А├Р┬╡├Р┬╝├С┬П"]["rich_text"][0]["text"]["content"]
+                
+                # ├Р┬б├Р┬╛├Р┬▒├Р┬╕├С┬А├Р┬░├Р┬╡├Р┬╝ ├Р┬┐├Р┬╛├Р┬╗├Р┬╜├С┬Г├С┬О ├Р┬┤├Р┬░├С┬В├С┬Г ├Р┬╕ ├Р┬▓├С┬А├Р┬╡├Р┬╝├С┬П ├Р┬▓├Р┬╕├Р┬╖├Р┬╕├С┬В├Р┬░
+                appt_dt = datetime.strptime(f"{p_date} {p_time}", "%Y-%m-%d %H:%M")
+                
+                # ├Р┬Х├С┬Б├Р┬╗├Р┬╕ ├Р┬▓├Р┬╕├Р┬╖├Р┬╕├С┬В ├Р┬▒├С┬Л├Р┬╗ ├Р┬▒├Р┬╛├Р┬╗├Р┬╡├Р┬╡ 1 ├С┬З├Р┬░├С┬Б├Р┬░ ├Р┬╜├Р┬░├Р┬╖├Р┬░├Р┬┤ ├в┬А┬Ф ├Р┬╖├Р┬░├Р┬║├С┬А├С┬Л├Р┬▓├Р┬░├Р┬╡├Р┬╝
+                if appt_dt + timedelta(hours=1) < now:
+                    update_booking_status(pid, "├Р┬Ч├Р┬░├Р┬▓├Р┬╡├С┬А├С┬И├Р┬╡├Р┬╜├Р┬╛")
+                    logger.info(f"├Р┬Р├Р┬▓├С┬В├Р┬╛-├Р┬╖├Р┬░├Р┬▓├Р┬╡├С┬А├С┬И├Р┬╡├Р┬╜├Р┬╕├Р┬╡ ├Р┬▓├Р┬╕├Р┬╖├Р┬╕├С┬В├Р┬░: {pid}")
+            except Exception as ex:
+                logger.error(f"├Р┬Ю├С┬И├Р┬╕├Р┬▒├Р┬║├Р┬░ ├Р┬╛├Р┬▒├С┬А├Р┬░├Р┬▒├Р┬╛├С┬В├Р┬║├Р┬╕ ├С┬Б├С┬В├С┬А├Р┬░├Р┬╜├Р┬╕├С┬Ж├С┬Л {pid}: {ex}")
+    except Exception as e:
+        logger.error(f"├Р┬Ю├С┬И├Р┬╕├Р┬▒├Р┬║├Р┬░ ├Р┬▓ auto_close_past_bookings: {e}")
+
+def save_booking(data: dict, page_id=None) -> str:
+    props = {
+        "├Р┬Ъ├Р┬╗├Р┬╕├Р┬╡├Р┬╜├С┬В":      {"title":        [{"text": {"content": data["name"]}}]},
+        "├Р┬в├Р┬╡├Р┬╗├Р┬╡├С┬Д├Р┬╛├Р┬╜":     {"phone_number": data["phone"]},
+        "├Р┬г├С┬Б├Р┬╗├С┬Г├Р┬│├Р┬░":      {"select":       {"name": data["service"]}},
+        "├Р┬Ь├Р┬░├С┬Б├С┬В├Р┬╡├С┬А":      {"select":       {"name": data["master"]}},
+        "├Р┬Ф├Р┬░├С┬В├Р┬░ ├Р┬╖├Р┬░├Р┬┐├Р┬╕├С┬Б├Р┬╕": {"date":         {"start": data["date"]}},
+        "├Р┬Т├С┬А├Р┬╡├Р┬╝├С┬П":       {"rich_text":    [{"text": {"content": data["time"]}}]},
+        "Chat ID":     {"rich_text":    [{"text": {"content": str(data["chat_id"])}}]},
+        "├Р┬б├С┬В├Р┬░├С┬В├С┬Г├С┬Б":      {"select":       {"name": "├Р┬Ч├Р┬░├Р┬┐├Р┬╗├Р┬░├Р┬╜├Р┬╕├С┬А├Р┬╛├Р┬▓├Р┬░├Р┬╜├Р┬╛"}},
+    }
+    r = np(page_id, {"properties": props}) if page_id else \
+        nc({"parent": {"database_id": DATABASE_ID}, "properties": props})
+    return r.get("id", "")
+
+def get_busy_slots(date: str, master_name: str) -> set:
+    """Vozvraschaet mnozhestvo zanyatykh vremennykh slotov."""
+    return booked_slots(date, master_name)
+
+
+=== main.py (22277 chars) ===
+# main.py
+import telebot
+from telebot import types
+import threading
+import time
+import logging
+from datetime import datetime, date, timedelta
+
+# --- ├Р┬Ш├Р┬Ь├Р┬Я├Р┬Ю├Р┬а├Р┬в├Р┬л ├Р┬Ш├Р┬Ч ├Р┬Э├Р┬Р├Р┬и├Р┬Ш├Р┬е ├Р┬Ь├Р┬Ю├Р┬Ф├Р┬г├Р┬Ы├Р┬Х├Р┬Щ ---
+from config import (
+    API_TOKEN, SPECIALIZATIONS, PRICES, 
+    ADMIN_ID, ADMIN_IDS, MASTERS_CHAT_IDS, LOYALTY
+)
+from keyboards import (
+    get_main_menu, cal, time_mk, 
+    get_categories_mk, get_services_mk, get_masters_mk
+)
+from notion_db import (
+    active_bookings, booked_slots, visits_done, discount, 
+    save_booking, update_booking_status, np, ng, nq,
+    auto_close_past_bookings
+)
+
+# ├Р┬Э├Р┬░├С┬Б├С┬В├С┬А├Р┬╛├Р┬╣├Р┬║├Р┬░ ├Р┬╗├Р┬╛├Р┬│├Р┬╕├С┬А├Р┬╛├Р┬▓├Р┬░├Р┬╜├Р┬╕├С┬П
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# ============================================================
+# ├Р┬Ш├Р┬Э├Р┬Ш├Р┬ж├Р┬Ш├Р┬Р├Р┬Ы├Р┬Ш├Р┬Ч├Р┬Р├Р┬ж├Р┬Ш├Р┬п
+# ============================================================
+bot = telebot.TeleBot(API_TOKEN)
+user_data: dict = {}
+booking_lock = threading.Lock()
+
+def main_menu(cid, text="├Р┬з├Р┬╡├Р┬╝ ├Р┬╝├Р┬╛├Р┬│├С┬Г ├Р┬┐├Р┬╛├Р┬╝├Р┬╛├С┬З├С┬М?"):
+    bot.send_message(cid, text, reply_markup=get_main_menu(), parse_mode="Markdown")
+
+def session_ok(call) -> bool:
+    cid = call.message.chat.id
+    if cid not in user_data or not user_data[cid].get("phone"):
+        bot.answer_callback_query(call.id, "├в┬Ъ┬а├п┬╕┬П ├Р┬б├Р┬╡├С┬Б├С┬Б├Р┬╕├С┬П ├Р┬╕├С┬Б├С┬В├Р┬╡├Р┬║├Р┬╗├Р┬░ ├в┬А┬Ф ├Р┬╜├Р┬░├С┬З├Р┬╜├Р┬╕├С┬В├Р┬╡ ├Р┬╖├Р┬░├Р┬╜├Р┬╛├Р┬▓├Р┬╛.", show_alert=True)
+        try: bot.delete_message(cid, call.message.message_id)
+        except: pass
+        main_menu(cid, "├Р┬б├Р┬╡├С┬Б├С┬Б├Р┬╕├С┬П ├Р┬╕├С┬Б├С┬В├Р┬╡├Р┬║├Р┬╗├Р┬░. ├Р┬Э├Р┬░├Р┬╢├Р┬╝├Р┬╕├С┬В├Р┬╡ *├░┬Я┬У┬Е ├Р┬Ч├Р┬░├Р┬┐├Р┬╕├С┬Б├Р┬░├С┬В├С┬М├С┬Б├С┬П*.")
+        return False
+    return True
+
+# ============================================================
+# /start
+# ============================================================
+@bot.message_handler(commands=["start"])
+def cmd_start(message):
+    cid = message.chat.id
+    if cid in user_data and user_data[cid].get("phone"):
+        return main_menu(cid, f"├░┬Я┬М┬Я ├Р┬б ├Р┬▓├Р┬╛├Р┬╖├Р┬▓├С┬А├Р┬░├С┬Й├Р┬╡├Р┬╜├Р┬╕├Р┬╡├Р┬╝, *{user_data[cid]['name']}*!")
+    bot.send_message(cid, "├░┬Я┬М┬Я *├Р┬Я├С┬А├Р┬╕├Р┬▓├Р┬╡├С┬В!*\n├Р┬Ъ├Р┬░├Р┬║ ├Р┬║ ├С┬В├Р┬╡├Р┬▒├Р┬╡ ├Р┬╛├Р┬▒├С┬А├Р┬░├С┬Й├Р┬░├С┬В├С┬М├С┬Б├С┬П? ├в┬Ь┬и",
+                     reply_markup=types.ReplyKeyboardRemove(), parse_mode="Markdown")
+    bot.register_next_step_handler(message, _s_phone)
+
+def _s_phone(message):
+    cid = message.chat.id
+    user_data[cid] = {"name": message.text}
+    mk = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    mk.add(types.KeyboardButton("├░┬Я┬У┬▒ ├Р┬Ю├С┬В├Р┬┐├С┬А├Р┬░├Р┬▓├Р┬╕├С┬В├С┬М ├Р┬╜├Р┬╛├Р┬╝├Р┬╡├С┬А", request_contact=True))
+    bot.send_message(cid, "├Р┬з├С┬В├Р┬╛├Р┬▒├С┬Л ├Р┬╝├С┬Л ├Р┬╝├Р┬╛├Р┬│├Р┬╗├Р┬╕ ├С┬Б├Р┬▓├С┬П├Р┬╖├Р┬░├С┬В├С┬М├С┬Б├С┬П, ├Р┬╛├С┬Б├С┬В├Р┬░├Р┬▓├С┬М ├С┬Б├Р┬▓├Р┬╛├Р┬╣ ├Р┬╜├Р┬╛├Р┬╝├Р┬╡├С┬А ├░┬Я┬С┬З", reply_markup=mk)
+    bot.register_next_step_handler(message, _s_save)
+
+def _s_save(message):
+    cid = message.chat.id
+    user_data[cid]["phone"] = message.contact.phone_number if message.contact else message.text
+    main_menu(cid, f"├в┬Ь┬и ├Р┬Я├С┬А├Р┬╕├Р┬▓├Р┬╡├С┬В, *{user_data[cid]['name']}*! ├Р┬Ь├Р┬╛├Р┬╢├Р┬╡├Р┬╝ ├Р┬┐├Р┬╡├С┬А├Р┬╡├С┬Е├Р┬╛├Р┬┤├Р┬╕├С┬В├С┬М ├Р┬║ ├Р┬╖├Р┬░├Р┬┐├Р┬╕├С┬Б├Р┬╕.")
+
+# ============================================================
+# ├Р┬Ч├Р┬Р├Р┬Я├Р┬Ш├Р┬б├Р┬м (UX IMPROVED)
+# ============================================================
+@bot.message_handler(func=lambda m: m.text == "├░┬Я┬У┬Е ├Р┬Ч├Р┬░├Р┬┐├Р┬╕├С┬Б├Р┬░├С┬В├С┬М├С┬Б├С┬П")
+def cmd_book(message):
+    cid = message.chat.id
+    if cid not in user_data or not user_data[cid].get("phone"):
+        bot.send_message(cid, "├Р┬Ъ├Р┬░├Р┬║ ├Р┬║ ├С┬В├Р┬╡├Р┬▒├Р┬╡ ├Р┬╛├Р┬▒├С┬А├Р┬░├С┬Й├Р┬░├С┬В├С┬М├С┬Б├С┬П? ├в┬Ь┬и", reply_markup=types.ReplyKeyboardRemove())
+        return bot.register_next_step_handler(message, _s_phone)
+    
+    # ├Р┬б├Р┬▒├С┬А├Р┬░├С┬Б├С┬Л├Р┬▓├Р┬░├Р┬╡├Р┬╝ ├Р┬┤├Р┬░├Р┬╜├Р┬╜├С┬Л├Р┬╡ ├С┬В├Р┬╡├Р┬║├С┬Г├С┬Й├Р┬╡├Р┬╣ ├Р┬╖├Р┬░├Р┬┐├Р┬╕├С┬Б├Р┬╕, ├С┬Б├Р┬╛├С┬Е├С┬А├Р┬░├Р┬╜├С┬П├С┬П ├Р┬┐├С┬А├Р┬╛├С┬Д├Р┬╕├Р┬╗├С┬М
+    name, phone = user_data[cid]["name"], user_data[cid]["phone"]
+    user_data[cid] = {"name": name, "phone": phone, "chat_id": cid}
+    
+    # ├Р┬б├С┬А├Р┬░├Р┬╖├С┬Г ├Р┬┐├Р┬╡├С┬А├Р┬╡├С┬Е├Р┬╛├Р┬┤├Р┬╕├Р┬╝ ├Р┬║ ├Р┬▓├С┬Л├Р┬▒├Р┬╛├С┬А├С┬Г ├Р┬║├Р┬░├С┬В├Р┬╡├Р┬│├Р┬╛├С┬А├Р┬╕├Р┬╕ ├Р┬▒├Р┬╡├Р┬╖ ├Р┬╗├Р┬╕├С┬И├Р┬╜├Р┬╕├С┬Е ├Р┬▓├Р┬╛├Р┬┐├С┬А├Р┬╛├С┬Б├Р┬╛├Р┬▓
+    bot.send_message(cid, "├Р┬Т├С┬Л├Р┬▒├Р┬╕├С┬А├Р┬░├Р┬╣ ├Р┬╜├С┬Г├Р┬╢├Р┬╜├С┬Г├С┬О ├Р┬║├Р┬░├С┬В├Р┬╡├Р┬│├Р┬╛├С┬А├Р┬╕├С┬О ├Р┬╜├Р┬╕├Р┬╢├Р┬╡ ├░┬Я┬С┬З", reply_markup=get_categories_mk())
+
+@bot.callback_query_handler(func=lambda c: c.data == "MAIN_MENU")
+def cb_main_menu(call):
+    cid = call.message.chat.id
+    try: bot.delete_message(cid, call.message.message_id)
+    except: pass
+    main_menu(cid)
+    bot.answer_callback_query(call.id)
+
+@bot.callback_query_handler(func=lambda c: c.data == "BACK_TO_CAT")
+def cb_back_to_cat(call):
+    bot.edit_message_text("├Р┬Т├С┬Л├Р┬▒├Р┬╕├С┬А├Р┬░├Р┬╣ ├Р┬╜├С┬Г├Р┬╢├Р┬╜├С┬Г├С┬О ├Р┬║├Р┬░├С┬В├Р┬╡├Р┬│├Р┬╛├С┬А├Р┬╕├С┬О ├Р┬╜├Р┬╕├Р┬╢├Р┬╡ ├░┬Я┬С┬З", call.message.chat.id, call.message.message_id, 
+                          reply_markup=get_categories_mk())
+    bot.answer_callback_query(call.id)
+
+@bot.callback_query_handler(func=lambda c: c.data.startswith("CAT|"))
+def cb_category(call):
+    cid = call.message.chat.id
+    cat = call.data.split("|")[1]
+    user_data[cid]["category"] = cat
+    bot.edit_message_text(f"├Р┬Т├С┬Л├Р┬▒├С┬А├Р┬░├Р┬╜├Р┬╛: *{cat}*\n├Р┬з├С┬В├Р┬╛ ├Р┬╕├Р┬╝├Р┬╡├Р┬╜├Р┬╜├Р┬╛ ├Р┬▒├С┬Г├Р┬┤├Р┬╡├Р┬╝ ├Р┬┤├Р┬╡├Р┬╗├Р┬░├С┬В├С┬М? ├░┬Я┬С┬З", 
+                          cid, call.message.message_id, 
+                          reply_markup=get_services_mk(cat), parse_mode="Markdown")
+    bot.answer_callback_query(call.id)
+
+@bot.callback_query_handler(func=lambda c: c.data == "BACK_TO_SVC")
+def cb_back_to_svc(call):
+    cat = user_data[call.message.chat.id].get("category")
+    bot.edit_message_text(f"├Р┬Т├С┬Л├Р┬▒├С┬А├Р┬░├Р┬╜├Р┬╛: *{cat}*\n├Р┬з├С┬В├Р┬╛ ├Р┬╕├Р┬╝├Р┬╡├Р┬╜├Р┬╜├Р┬╛ ├Р┬▒├С┬Г├Р┬┤├Р┬╡├Р┬╝ ├Р┬┤├Р┬╡├Р┬╗├Р┬░├С┬В├С┬М? ├░┬Я┬С┬З", 
+                          call.message.chat.id, call.message.message_id, 
+                          reply_markup=get_services_mk(cat), parse_mode="Markdown")
+    bot.answer_callback_query(call.id)
+
+@bot.callback_query_handler(func=lambda c: c.data.startswith("SVC|"))
+def cb_service(call):
+    cid = call.message.chat.id
+    svc = call.data.split("|")[1]
+    user_data[cid]["service"] = svc
+    cat = user_data[cid]["category"]
+    bot.edit_message_text(f"├Р┬г├С┬Б├Р┬╗├С┬Г├Р┬│├Р┬░: *{svc}*\n├Р┬Т├С┬Л├Р┬▒├Р┬╕├С┬А├Р┬░├Р┬╣ ├Р┬╝├Р┬░├С┬Б├С┬В├Р┬╡├С┬А├Р┬░ ├░┬Я┬С┬З", 
+                          cid, call.message.message_id, 
+                          reply_markup=get_masters_mk(cat), parse_mode="Markdown")
+    bot.answer_callback_query(call.id)
+
+@bot.callback_query_handler(func=lambda c: c.data == "BACK_TO_MST")
+def cb_back_to_mst(call):
+    svc = user_data[call.message.chat.id].get("service")
+    cat = user_data[call.message.chat.id].get("category")
+    bot.edit_message_text(f"├Р┬г├С┬Б├Р┬╗├С┬Г├Р┬│├Р┬░: *{svc}*\n├Р┬Т├С┬Л├Р┬▒├Р┬╕├С┬А├Р┬░├Р┬╣ ├Р┬╝├Р┬░├С┬Б├С┬В├Р┬╡├С┬А├Р┬░ ├░┬Я┬С┬З", 
+                          call.message.chat.id, call.message.message_id, 
+                          reply_markup=get_masters_mk(cat), parse_mode="Markdown")
+    bot.answer_callback_query(call.id)
+
+@bot.callback_query_handler(func=lambda c: c.data.startswith("MST|"))
+def cb_master_choice(call):
+    cid = call.message.chat.id
+    master = call.data.split("|")[1]
+    user_data[cid]["master"] = master
+    t = date.today()
+    bot.edit_message_text(f"├Р┬Ь├Р┬░├С┬Б├С┬В├Р┬╡├С┬А: *{master}*\n├Р┬Т├С┬Л├Р┬▒├Р┬╕├С┬А├Р┬░├Р┬╣ ├С┬Г├Р┬┤├Р┬╛├Р┬▒├Р┬╜├С┬Л├Р┬╣ ├Р┬┤├Р┬╡├Р┬╜├С┬М ├░┬Я┬С┬З", 
+                          cid, call.message.message_id, 
+                          reply_markup=cal(t.year, t.month), parse_mode="Markdown")
+    bot.answer_callback_query(call.id)
+
+@bot.callback_query_handler(func=lambda c: c.data == "BACK_TO_CAL")
+def cb_back_to_cal(call):
+    master = user_data[call.message.chat.id].get("master")
+    t = date.today()
+    bot.edit_message_text(f"├Р┬Ь├Р┬░├С┬Б├С┬В├Р┬╡├С┬А: *{master}*\n├Р┬Т├С┬Л├Р┬▒├Р┬╕├С┬А├Р┬░├Р┬╣ ├С┬Г├Р┬┤├Р┬╛├Р┬▒├Р┬╜├С┬Л├Р┬╣ ├Р┬┤├Р┬╡├Р┬╜├С┬М ├░┬Я┬С┬З", 
+                          call.message.chat.id, call.message.message_id, 
+                          reply_markup=cal(t.year, t.month), parse_mode="Markdown")
+    bot.answer_callback_query(call.id)
+
+# ============================================================
+# CALLBACKS (├Р┬Ъ├Р┬Р├Р┬Ы├Р┬Х├Р┬Э├Р┬Ф├Р┬Р├Р┬а├Р┬м, ├Р┬Т├Р┬а├Р┬Х├Р┬Ь├Р┬п)
+# ============================================================
+@bot.callback_query_handler(func=lambda c: c.data == "ign")
+def cb_ign(call): bot.answer_callback_query(call.id)
+
+@bot.callback_query_handler(func=lambda c: c.data.startswith("N|"))
+def cb_nav(call):
+    _, y, m = call.data.split("|")
+    bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id,
+                                  reply_markup=cal(int(y), int(m)))
+    bot.answer_callback_query(call.id)
+
+@bot.callback_query_handler(func=lambda c: c.data.startswith("D|"))
+def cb_date(call):
+    cid = call.message.chat.id
+    if not session_ok(call): return
+    _, y, m, d = call.data.split("|")
+    chosen = date(int(y), int(m), int(d))
+    if chosen < date.today():
+        return bot.answer_callback_query(call.id, "├Р┬Э├Р┬╡├Р┬╗├С┬М├Р┬╖├С┬П ├Р┬▓├С┬Л├Р┬▒├С┬А├Р┬░├С┬В├С┬М ├Р┬┐├С┬А├Р┬╛├С┬И├Р┬╡├Р┬┤├С┬И├С┬Г├С┬О ├Р┬┤├Р┬░├С┬В├С┬Г!")
+    ds = chosen.strftime("%Y-%m-%d")
+    user_data[cid]["date"] = ds
+    master = user_data[cid]["master"]
+    bot.edit_message_text(
+        f"├░┬Я┬У┬Е *{chosen.strftime('%d.%m.%Y')}* ├в┬А┬Ф ├Р┬▓├С┬Л├Р┬▒├Р┬╕├С┬А├Р┬░├Р┬╣ ├Р┬▓├С┬А├Р┬╡├Р┬╝├С┬П ├░┬Я┬С┬З",
+        cid, call.message.message_id,
+        reply_markup=time_mk(ds, master), parse_mode="Markdown")
+    bot.answer_callback_query(call.id)
+
+@bot.callback_query_handler(func=lambda c: c.data.startswith("T|"))
+def cb_time(call):
+    cid = call.message.chat.id
+    if not session_ok(call): return
+    slot = call.data[2:]          
+    user_data[cid]["time"] = slot
+    d = user_data[cid]
+    disc = discount(cid)
+    price = PRICES.get(d["service"], 0)
+    pl = ""
+    if price:
+        final = int(price * (1 - disc/100))
+        pl = f"\n├░┬Я┬Т┬░ {price} ├С┬А├С┬Г├Р┬▒."
+        if disc: pl += f" ├в┬Ж┬Т *{final} ├С┬А├С┬Г├Р┬▒.* (├С┬Б├Р┬║├Р┬╕├Р┬┤├Р┬║├Р┬░ {disc}% ├░┬Я┬О┬Б)"
+    mk = types.InlineKeyboardMarkup()
+    mk.add(types.InlineKeyboardButton("├в┬Ь┬Е ├Р┬Я├Р┬╛├Р┬┤├С┬В├Р┬▓├Р┬╡├С┬А├Р┬┤├Р┬╕├С┬В├С┬М", callback_data="OK"),
+           types.InlineKeyboardButton("├в┬Э┬М ├Р┬Ю├С┬В├Р┬╝├Р┬╡├Р┬╜├Р┬░",      callback_data="CX"))
+    bot.edit_message_text(
+        f"├░┬Я┬У┬Л *├Р┬Я├Р┬╛├Р┬┤├С┬В├Р┬▓├Р┬╡├С┬А├Р┬┤├Р┬╕├С┬В├Р┬╡ ├Р┬╖├Р┬░├Р┬┐├Р┬╕├С┬Б├С┬М:*\n\n"
+        f"├░┬Я┬С┬д {d['name']}\n├░┬Я┬Т┬Ж {d['service']}\n├в┬Ь┬В├п┬╕┬П {d['master']}\n"
+        f"├░┬Я┬У┬Е {d['date']} ├Р┬▓ {slot}{pl}\n\n├Р┬Т├С┬Б├С┬С ├Р┬▓├Р┬╡├С┬А├Р┬╜├Р┬╛?",
+        cid, call.message.message_id, reply_markup=mk, parse_mode="Markdown")
+    bot.answer_callback_query(call.id)
+
+@bot.callback_query_handler(func=lambda c: c.data == "CX")
+def cb_cx(call):
+    cid = call.message.chat.id
+    try: bot.delete_message(cid, call.message.message_id)
+    except: pass
+    main_menu(cid, "├Р┬Ч├Р┬░├Р┬┐├Р┬╕├С┬Б├С┬М ├Р┬╛├С┬В├Р┬╝├Р┬╡├Р┬╜├Р┬╡├Р┬╜├Р┬░.")
+    bot.answer_callback_query(call.id)
+
+@bot.callback_query_handler(func=lambda c: c.data == "OK")
+def cb_ok(call):
+    cid = call.message.chat.id
+    if not user_data.get(cid) or not user_data[cid].get("time"):
+        bot.answer_callback_query(call.id, "├в┬Ъ┬а├п┬╕┬П ├Р┬б├Р┬╡├С┬Б├С┬Б├Р┬╕├С┬П ├Р┬╕├С┬Б├С┬В├Р┬╡├Р┬║├Р┬╗├Р┬░.", show_alert=True)
+        return main_menu(cid, "├Р┬б├Р┬╡├С┬Б├С┬Б├Р┬╕├С┬П ├Р┬╕├С┬Б├С┬В├Р┬╡├Р┬║├Р┬╗├Р┬░ ├в┬А┬Ф ├Р┬╜├Р┬░├С┬З├Р┬╜├Р┬╕├С┬В├Р┬╡ ├Р┬╖├Р┬░├Р┬╜├Р┬╛├Р┬▓├Р┬╛.")
+    d = user_data[cid]; d["chat_id"] = cid
+    
+    with booking_lock:
+        if d["time"] in booked_slots(d["date"], d["master"]):
+            bot.answer_callback_query(call.id, "├в┬Ъ┬а├п┬╕┬П ├Р┬б├Р┬╗├Р┬╛├С┬В ├Р┬╖├Р┬░├Р┬╜├С┬П├С┬В!", show_alert=True)
+            bot.edit_message_reply_markup(cid, call.message.message_id,
+                                          reply_markup=time_mk(d["date"], d["master"]))
+            return
+        pid = d.pop("page_id", None)
+        booking_id = save_booking(d, pid)
+    
+    # ├Р┬Я├Р┬╛├Р┬┤├Р┬│├Р┬╛├С┬В├Р┬╛├Р┬▓├Р┬║├Р┬░ ├С┬Г├Р┬▓├Р┬╡├Р┬┤├Р┬╛├Р┬╝├Р┬╗├Р┬╡├Р┬╜├Р┬╕├С┬П
+    msg_text = (f"├в┬Ъ┬а├п┬╕┬П *├Р┬Э├Р┬╛├Р┬▓├Р┬░├С┬П ├Р┬╖├Р┬░├Р┬┐├Р┬╕├С┬Б├С┬М!*\n"
+                f"├░┬Я┬С┬д ├Р┬Ъ├Р┬╗├Р┬╕├Р┬╡├Р┬╜├С┬В: {d['name']} ({d['phone']})\n"
+                f"├░┬Я┬Т┬Ж ├Р┬г├С┬Б├Р┬╗├С┬Г├Р┬│├Р┬░: {d['service']}\n"
+                f"├░┬Я┬У┬Е ├Р┬Т├С┬А├Р┬╡├Р┬╝├С┬П: {d['date']} ├Р┬▓ {d['time']}")
+    
+    mk_admin = types.InlineKeyboardMarkup()
+    mk_admin.add(
+        types.InlineKeyboardButton("├в┬Ь┬Е ├Р┬Ч├Р┬░├Р┬▓├Р┬╡├С┬А├С┬И├Р┬╕├С┬В├С┬М", callback_data=f"ST::├Р┬Ч├Р┬░├Р┬▓├Р┬╡├С┬А├С┬И├Р┬╡├Р┬╜├Р┬╛::{booking_id}"),
+        types.InlineKeyboardButton("├в┬Э┬М ├Р┬Ю├С┬В├Р┬╝├Р┬╡├Р┬╜├Р┬╕├С┬В├С┬М",   callback_data=f"ST::├Р┬Ю├С┬В├Р┬╝├Р┬╡├Р┬╜├Р┬╡├Р┬╜├Р┬░::{booking_id}")
+    )
+    
+    # ├Р┬г├Р┬▓├Р┬╡├Р┬┤├Р┬╛├Р┬╝├Р┬╗├Р┬╡├Р┬╜├Р┬╕├Р┬╡ ├Р┬░├Р┬┤├Р┬╝├Р┬╕├Р┬╜├Р┬░├Р┬╝
+    for admin_id in ADMIN_IDS:
+        try: bot.send_message(admin_id, msg_text, reply_markup=mk_admin, parse_mode="Markdown")
+        except: pass
+
+    # ├Р┬г├Р┬▓├Р┬╡├Р┬┤├Р┬╛├Р┬╝├Р┬╗├Р┬╡├Р┬╜├Р┬╕├Р┬╡ ├Р┬╝├Р┬░├С┬Б├С┬В├Р┬╡├С┬А├С┬Г (├Р┬╡├С┬Б├Р┬╗├Р┬╕ ├Р┬╡├С┬Б├С┬В├С┬М ├Р┬▓ ├С┬Б├Р┬╗├Р┬╛├Р┬▓├Р┬░├С┬А├Р┬╡)
+    mid = MASTERS_CHAT_IDS.get(d["master"])
+    if mid:
+        try:
+            bot.send_message(mid, f"├░┬Я┬Ф┬Ф *├Р┬г ├Р┬Т├Р┬░├С┬Б ├Р┬╜├Р┬╛├Р┬▓├Р┬░├С┬П ├Р┬╖├Р┬░├Р┬┐├Р┬╕├С┬Б├С┬М!*\n\n{msg_text}", 
+                             reply_markup=mk_admin, parse_mode="Markdown")
+            logger.info(f"├Р┬Ю├С┬В├Р┬┐├С┬А├Р┬░├Р┬▓├Р┬╗├Р┬╡├Р┬╜├Р┬╛ ├С┬Г├Р┬▓├Р┬╡├Р┬┤├Р┬╛├Р┬╝├Р┬╗├Р┬╡├Р┬╜├Р┬╕├Р┬╡ ├Р┬╝├Р┬░├С┬Б├С┬В├Р┬╡├С┬А├С┬Г {d['master']} (ID: {mid})")
+        except Exception as e:
+            logger.error(f"├Р┬Ю├С┬И├Р┬╕├Р┬▒├Р┬║├Р┬░ ├С┬Г├Р┬▓├Р┬╡├Р┬┤├Р┬╛├Р┬╝├Р┬╗├Р┬╡├Р┬╜├Р┬╕├С┬П ├Р┬╝├Р┬░├С┬Б├С┬В├Р┬╡├С┬А├Р┬░: {e}")
+
+    bot.edit_message_text(
+        "├Р┬У├Р┬╛├С┬В├Р┬╛├Р┬▓├Р┬╛! ├Р┬Ц├Р┬┤├Р┬╡├Р┬╝ ├С┬В├Р┬╡├Р┬▒├С┬П ├Р┬▓ ├Р┬▓├С┬Л├Р┬▒├С┬А├Р┬░├Р┬╜├Р┬╜├Р┬╛├Р┬╡ ├Р┬▓├С┬А├Р┬╡├Р┬╝├С┬П. ├Р┬Х├С┬Б├Р┬╗├Р┬╕ ├Р┬┐├Р┬╗├Р┬░├Р┬╜├С┬Л ├Р┬╕├Р┬╖├Р┬╝├Р┬╡├Р┬╜├С┬П├С┬В├С┬Б├С┬П ├в┬А┬Ф ├Р┬╜├Р┬░├Р┬┐├Р┬╕├С┬И├Р┬╕ ├Р┬╜├Р┬░├Р┬╝ ├░┬Я┬М┬╕",
+        cid, call.message.message_id, parse_mode="Markdown")
+    bot.answer_callback_query(call.id)
+    main_menu(cid)
+
+@bot.callback_query_handler(func=lambda c: c.data.startswith("ST::"))
+def cb_admin_status(call):
+    # ├Р┬а├Р┬░├Р┬╖├С┬А├Р┬╡├С┬И├Р┬░├Р┬╡├Р┬╝ ├Р┬╝├Р┬╡├Р┬╜├С┬П├С┬В├С┬М ├С┬Б├С┬В├Р┬░├С┬В├С┬Г├С┬Б ├Р┬░├Р┬┤├Р┬╝├Р┬╕├Р┬╜├Р┬░├Р┬╝ ├Р┬╕ ├Р┬╝├Р┬░├С┬Б├С┬В├Р┬╡├С┬А├Р┬░├Р┬╝ (├Р┬╡├С┬Б├Р┬╗├Р┬╕ ├Р┬╕├С┬Е ID ├Р┬▓ ├С┬Б├Р┬┐├Р┬╕├С┬Б├Р┬║├Р┬╡)
+    all_allowed = set(ADMIN_IDS) | set(MASTERS_CHAT_IDS.values())
+    if call.message.chat.id not in all_allowed:
+        return bot.answer_callback_query(call.id, "├░┬Я┬Ъ┬л ├Р┬Э├Р┬╡├С┬В ├Р┬┤├Р┬╛├С┬Б├С┬В├С┬Г├Р┬┐├Р┬░.")
+    
+    _, status, pid = call.data.split("::")
+    if update_booking_status(pid, status):
+        icon = "├в┬Ь┬Е" if status == "├Р┬Ч├Р┬░├Р┬▓├Р┬╡├С┬А├С┬И├Р┬╡├Р┬╜├Р┬╛" else "├в┬Э┬М"
+        bot.edit_message_text(f"{call.message.text}\n\n{icon} *├Р┬б├С┬В├Р┬░├С┬В├С┬Г├С┬Б ├Р┬╕├Р┬╖├Р┬╝├Р┬╡├Р┬╜├Р┬╡├Р┬╜ ├Р┬╜├Р┬░: {status}*", 
+                              call.message.chat.id, call.message.message_id, parse_mode="Markdown")
+        bot.answer_callback_query(call.id, "├в┬Ь┬Е ├Р┬б├С┬В├Р┬░├С┬В├С┬Г├С┬Б ├С┬Г├С┬Б├Р┬┐├Р┬╡├С┬И├Р┬╜├Р┬╛ ├Р┬╛├Р┬▒├Р┬╜├Р┬╛├Р┬▓├Р┬╗├Р┬╡├Р┬╜!", show_alert=False)
+    else:
+        bot.answer_callback_query(call.id, "├в┬Ъ┬а├п┬╕┬П ├Р┬Ю├С┬И├Р┬╕├Р┬▒├Р┬║├Р┬░ ├Р┬┐├С┬А├Р┬╕ ├Р┬╛├Р┬▒├Р┬╜├Р┬╛├Р┬▓├Р┬╗├Р┬╡├Р┬╜├Р┬╕├Р┬╕ ├С┬Б├С┬В├Р┬░├С┬В├С┬Г├С┬Б├Р┬░ ├Р┬▓ Notion", show_alert=True)
+
+# ============================================================
+# ├Р┬Р├Р┬Т├Р┬в├Р┬Ю├Р┬Ь├Р┬Р├Р┬в├Р┬Ш├Р┬Ч├Р┬Р├Р┬ж├Р┬Ш├Р┬п
+# ============================================================
+def auto_status_manager():
+    """├Р┬д├Р┬╛├Р┬╜├Р┬╛├Р┬▓├С┬Л├Р┬╣ ├Р┬┐├Р┬╛├С┬В├Р┬╛├Р┬║ ├Р┬┤├Р┬╗├С┬П ├Р┬░├Р┬▓├С┬В├Р┬╛-├Р┬╖├Р┬░├Р┬▓├Р┬╡├С┬А├С┬И├Р┬╡├Р┬╜├Р┬╕├С┬П ├Р┬╖├Р┬░├Р┬┐├Р┬╕├С┬Б├Р┬╡├Р┬╣"""
+    while True:
+        try:
+            auto_close_past_bookings()
+        except Exception as e:
+            logger.error(f"├Р┬Ю├С┬И├Р┬╕├Р┬▒├Р┬║├Р┬░ ├Р┬▓ auto_status_manager: {e}")
+        time.sleep(1800) # ├Р┬Ъ├Р┬░├Р┬╢├Р┬┤├С┬Л├Р┬╡ 30 ├Р┬╝├Р┬╕├Р┬╜├С┬Г├С┬В
+
+# ============================================================
+# ├Р┬Ь├Р┬Ю├Р┬Ш ├Р┬Ч├Р┬Р├Р┬Я├Р┬Ш├Р┬б├Р┬Ш
+# ============================================================
+@bot.message_handler(commands=["mybookings"])
+@bot.message_handler(func=lambda m: m.text == "├░┬Я┬У┬Л ├Р┬Ь├Р┬╛├Р┬╕ ├Р┬╖├Р┬░├Р┬┐├Р┬╕├С┬Б├Р┬╕")
+def cmd_my(message):
+    cid = message.chat.id
+    res = active_bookings(cid)
+    if not res:
+        return bot.send_message(cid, "├Р┬Э├Р┬╡├С┬В ├Р┬░├Р┬║├С┬В├Р┬╕├Р┬▓├Р┬╜├С┬Л├С┬Е ├Р┬╖├Р┬░├Р┬┐├Р┬╕├С┬Б├Р┬╡├Р┬╣. ├Р┬Э├Р┬░├Р┬╢├Р┬╝├Р┬╕├С┬В├Р┬╡ *├░┬Я┬У┬Е ├Р┬Ч├Р┬░├Р┬┐├Р┬╕├С┬Б├Р┬░├С┬В├С┬М├С┬Б├С┬П*!",
+                                parse_mode="Markdown")
+    lines = ["├░┬Я┬У┬Л *├Р┬Т├Р┬░├С┬И├Р┬╕ ├Р┬╖├Р┬░├Р┬┐├Р┬╕├С┬Б├Р┬╕:*\n"]
+    for page in res:
+        p = page["properties"]
+        try:
+            lines.append(
+                f"├в┬А┬в {p['├Р┬Ф├Р┬░├С┬В├Р┬░ ├Р┬╖├Р┬░├Р┬┐├Р┬╕├С┬Б├Р┬╕']['date']['start']} {p['├Р┬Т├С┬А├Р┬╡├Р┬╝├С┬П']['rich_text'][0]['text']['content']} ├в┬А┬Ф "
+                f"{p['├Р┬г├С┬Б├Р┬╗├С┬Г├Р┬│├Р┬░']['select']['name']} ({p['├Р┬Ь├Р┬░├С┬Б├С┬В├Р┬╡├С┬А']['select']['name']})")
+        except: pass
+    bot.send_message(cid, "\n".join(lines), parse_mode="Markdown")
+
+# ============================================================
+# ├Р┬Я├Р┬а├Р┬Ю├Р┬У├Р┬а├Р┬Р├Р┬Ь├Р┬Ь├Р┬Р ├Р┬Ы├Р┬Ю├Р┬п├Р┬Ы├Р┬м├Р┬Э├Р┬Ю├Р┬б├Р┬в├Р┬Ш
+# ============================================================
+@bot.message_handler(func=lambda m: m.text == "├░┬Я┬О┬Б ├Р┬Ь├Р┬╛├С┬П ├С┬Б├Р┬║├Р┬╕├Р┬┤├Р┬║├Р┬░")
+def cmd_loyal(message):
+    cid = message.chat.id
+    v = visits_done(cid)
+    d = discount(cid)
+    
+    if v < 5:
+        left_to_five = 5 - v
+        reward_msg = f"├░┬Я┬О┬Б ├Р┬Ф├Р┬╛ ├Р┬Т├Р┬░├С┬И├Р┬╡├Р┬│├Р┬╛ *5-├Р┬│├Р┬╛* ├В┬л├Р┬┐├Р┬╛├Р┬┤├Р┬░├С┬А├Р┬╛├С┬З├Р┬╜├Р┬╛├Р┬│├Р┬╛├В┬╗ ├Р┬▓├Р┬╕├Р┬╖├Р┬╕├С┬В├Р┬░ ├Р┬╛├С┬Б├С┬В├Р┬░├Р┬╗├Р┬╛├С┬Б├С┬М: *{left_to_five}* ├Р┬▓├Р┬╕├Р┬╖├Р┬╕├С┬В(├Р┬░)!"
+    else:
+        reward_msg = "├в┬Ь┬и ├Р┬Т├С┬Л ├С┬Г├Р┬╢├Р┬╡ ├Р┬┐├С┬А├Р┬╛├С┬И├Р┬╗├Р┬╕ ├Р┬┐├Р┬╛├С┬А├Р┬╛├Р┬│ 5-├С┬В├Р┬╕ ├Р┬▓├Р┬╕├Р┬╖├Р┬╕├С┬В├Р┬╛├Р┬▓ ├Р┬╕ ├С┬П├Р┬▓├Р┬╗├С┬П├Р┬╡├С┬В├Р┬╡├С┬Б├С┬М ├Р┬╜├Р┬░├С┬И├Р┬╕├Р┬╝ ├Р┬╗├С┬О├Р┬▒├Р┬╕├Р┬╝├С┬Л├Р┬╝ ├Р┬║├Р┬╗├Р┬╕├Р┬╡├Р┬╜├С┬В├Р┬╛├Р┬╝!"
+
+    nxt = next((t for t in sorted(LOYALTY) if t > v), None)
+    next_lvl = f"\n├░┬Я┬Ъ┬А ├Р┬Ф├Р┬╛ ├С┬Б├Р┬║├Р┬╕├Р┬┤├Р┬║├Р┬╕ *{LOYALTY[nxt]}%* ├Р┬╛├С┬Б├С┬В├Р┬░├Р┬╗├Р┬╛├С┬Б├С┬М *{nxt-v}* ├Р┬▓├Р┬╕├Р┬╖├Р┬╕├С┬В(├Р┬░)." if nxt else ""
+    
+    text = (f"├░┬Я┬С┬д *├Р┬Т├Р┬░├С┬И ├С┬Б├С┬В├Р┬░├С┬В├С┬Г├С┬Б:*\n"
+            f"├в┬Ь┬Е ├Р┬Ч├Р┬░├Р┬▓├Р┬╡├С┬А├С┬И├Р┬╡├Р┬╜├Р┬╛ ├Р┬▓├Р┬╕├Р┬╖├Р┬╕├С┬В├Р┬╛├Р┬▓: *{v}*\n"
+            f"├░┬Я┬Т┬░ ├Р┬в├Р┬╡├Р┬║├С┬Г├С┬Й├Р┬░├С┬П ├С┬Б├Р┬║├Р┬╕├Р┬┤├Р┬║├Р┬░: *{d}%*\n\n"
+            f"{reward_msg}{next_lvl}")
+            
+    bot.send_message(cid, text, parse_mode="Markdown")
+
+# ============================================================
+# ├Р┬Я├Р┬Х├Р┬а├Р┬Х├Р┬Э├Р┬Ю├Р┬б / ├Р┬Ю├Р┬в├Р┬Ь├Р┬Х├Р┬Э├Р┬Р (USER SIDE)
+# ============================================================
+@bot.message_handler(func=lambda m: m.text in ["├░┬Я┬Ф┬Д ├Р┬Я├Р┬╡├С┬А├Р┬╡├Р┬╜├Р┬╡├С┬Б├С┬В├Р┬╕ ├Р┬╖├Р┬░├Р┬┐├Р┬╕├С┬Б├С┬М", "├в┬Э┬М ├Р┬Ю├С┬В├Р┬╝├Р┬╡├Р┬╜├Р┬╕├С┬В├С┬М ├Р┬▓├Р┬╕├Р┬╖├Р┬╕├С┬В"])
+def cmd_manage(message):
+    cid = message.chat.id
+    is_rs = "├Р┬Я├Р┬╡├С┬А├Р┬╡├Р┬╜├Р┬╡├С┬Б├С┬В├Р┬╕" in message.text
+    res = active_bookings(cid)
+    if not res:
+        return bot.send_message(cid, "├░┬Я┬Ш┬Ф ├Р┬Э├Р┬╡├С┬В ├Р┬░├Р┬║├С┬В├Р┬╕├Р┬▓├Р┬╜├С┬Л├С┬Е ├Р┬╖├Р┬░├Р┬┐├Р┬╕├С┬Б├Р┬╡├Р┬╣.")
+    mk = types.InlineKeyboardMarkup()
+    for page in res:
+        p = page["properties"]
+        try:
+            d = p["├Р┬Ф├Р┬░├С┬В├Р┬░ ├Р┬╖├Р┬░├Р┬┐├Р┬╕├С┬Б├Р┬╕"]["date"]["start"]
+            t = p["├Р┬Т├С┬А├Р┬╡├Р┬╝├С┬П"]["rich_text"][0]["text"]["content"]
+            s = p["├Р┬г├С┬Б├Р┬╗├С┬Г├Р┬│├Р┬░"]["select"]["name"]
+            pid = page["id"]
+            mk.add(types.InlineKeyboardButton(
+                f"{s} | {d} ├Р┬▓ {t}",
+                callback_data=f"{'RS' if is_rs else 'CN'}::{pid}"))
+        except: continue
+    bot.send_message(cid, f"├Р┬Ъ├Р┬░├Р┬║├С┬Г├С┬О ├Р┬╖├Р┬░├Р┬┐├Р┬╕├С┬Б├С┬М {'├Р┬┐├Р┬╡├С┬А├Р┬╡├Р┬╜├Р┬╡├С┬Б├С┬В├Р┬╕' if is_rs else '├Р┬╛├С┬В├Р┬╝├Р┬╡├Р┬╜├Р┬╕├С┬В├С┬М'}?",
+                     reply_markup=mk)
+
+@bot.callback_query_handler(func=lambda c: c.data.startswith(("CN::", "RS::")))
+def cb_manage(call):
+    cid    = call.message.chat.id
+    action = call.data[:2]
+    pid    = call.data[4:]
+
+    if action == "CN":
+        r = np(pid, {"properties": {
+            "├Р┬б├С┬В├Р┬░├С┬В├С┬Г├С┬Б":      {"select":    {"name": "├Р┬Ю├С┬В├Р┬╝├Р┬╡├Р┬╜├Р┬╡├Р┬╜├Р┬░"}},
+            "├Р┬Ф├Р┬░├С┬В├Р┬░ ├Р┬╖├Р┬░├Р┬┐├Р┬╕├С┬Б├Р┬╕": {"date":      None},
+            "├Р┬Т├С┬А├Р┬╡├Р┬╝├С┬П":       {"rich_text": []},
+        }})
+        msg = "├в┬Ь┬Е ├Р┬Ч├Р┬░├Р┬┐├Р┬╕├С┬Б├С┬М ├Р┬╛├С┬В├Р┬╝├Р┬╡├Р┬╜├Р┬╡├Р┬╜├Р┬░. ├Р┬С├С┬Г├Р┬┤├Р┬╡├Р┬╝ ├С┬А├Р┬░├Р┬┤├С┬Л ├Р┬▓├Р┬╕├Р┬┤├Р┬╡├С┬В├С┬М ├Р┬Т├Р┬░├С┬Б ├С┬Б├Р┬╜├Р┬╛├Р┬▓├Р┬░! ├░┬Я┬Т┬л" if r.get("id") \
+              else "├в┬Ъ┬а├п┬╕┬П ├Р┬Э├Р┬╡ ├С┬Г├Р┬┤├Р┬░├Р┬╗├Р┬╛├С┬Б├С┬М ├Р┬╛├С┬В├Р┬╝├Р┬╡├Р┬╜├Р┬╕├С┬В├С┬М. ├Р┬Я├Р┬╛├Р┬┐├С┬А├Р┬╛├Р┬▒├С┬Г├Р┬╣├С┬В├Р┬╡ ├Р┬╡├С┬Й├С┬С ├С┬А├Р┬░├Р┬╖."
+        bot.edit_message_text(msg, cid, call.message.message_id)
+        bot.answer_callback_query(call.id, "├Р┬Ч├Р┬░├Р┬┐├Р┬╕├С┬Б├С┬М ├Р┬╛├С┬В├Р┬╝├Р┬╡├Р┬╜├Р┬╡├Р┬╜├Р┬░")
+    else:
+        r = ng(pid); p = r.get("properties", {})
+        try:
+            service = p["├Р┬г├С┬Б├Р┬╗├С┬Г├Р┬│├Р┬░"]["select"]["name"]
+            user_data[cid] = {
+                "name":     p["├Р┬Ъ├Р┬╗├Р┬╕├Р┬╡├Р┬╜├С┬В"]["title"][0]["text"]["content"],
+                "phone":    p["├Р┬в├Р┬╡├Р┬╗├Р┬╡├С┬Д├Р┬╛├Р┬╜"]["phone_number"],
+                "service":  service,
+                "master":   p["├Р┬Ь├Р┬░├С┬Б├С┬В├Р┬╡├С┬А"]["select"]["name"],
+                "category": next((k for k, v in SPECIALIZATIONS.items()
+                                  if service in v["services"]), ""),
+                "chat_id":  cid,
+                "page_id":  pid,
+            }
+            try: bot.delete_message(cid, call.message.message_id)
+            except: pass
+            t = date.today()
+            bot.send_message(cid, "├Р┬Т├С┬Л├Р┬▒├Р┬╡├С┬А├Р┬╕├С┬В├Р┬╡ ├Р┬╜├Р┬╛├Р┬▓├С┬Г├С┬О ├Р┬┤├Р┬░├С┬В├С┬Г:",
+                             reply_markup=cal(t.year, t.month))
+            bot.answer_callback_query(call.id)
+        except:
+            bot.answer_callback_query(call.id, "├в┬Ъ┬а├п┬╕┬П ├Р┬Ю├С┬И├Р┬╕├Р┬▒├Р┬║├Р┬░ ├Р┬╖├Р┬░├Р┬│├С┬А├С┬Г├Р┬╖├Р┬║├Р┬╕ ├Р┬╖├Р┬░├Р┬┐├Р┬╕├С┬Б├Р┬╕.", show_alert=True)
+
+# ============================================================
+# ├Р┬Э├Р┬Р├Р┬Я├Р┬Ю├Р┬Ь├Р┬Ш├Р┬Э├Р┬Р├Р┬Э├Р┬Ш├Р┬п
+# ============================================================
+def _reminders():
+    notified: set = set()
+    while True:
+        try:
+            now = datetime.now()
+            for hrs, lbl in [(24, "24h"), (2, "2h")]:
+                target = now + timedelta(hours=hrs)
+                ds = target.strftime("%Y-%m-%d")
+                for page in nq({"filter": {"and": [
+                    {"property": "├Р┬Ф├Р┬░├С┬В├Р┬░ ├Р┬╖├Р┬░├Р┬┐├Р┬╕├С┬Б├Р┬╕", "date": {"equals": ds}},
+                    {"property": "├Р┬б├С┬В├Р┬░├С┬В├С┬Г├С┬Б", "select": {"equals": "├Р┬Ч├Р┬░├Р┬┐├Р┬╗├Р┬░├Р┬╜├Р┬╕├С┬А├Р┬╛├Р┬▓├Р┬░├Р┬╜├Р┬╛"}},
+                ]}}):
+                    pid = page["id"]
+                    if (pid, lbl) in notified: continue
+                    p = page["properties"]
+                    try:
+                        t = p["├Р┬Т├С┬А├Р┬╡├Р┬╝├С┬П"]["rich_text"][0]["text"]["content"]
+                        appt = datetime.strptime(f"{ds} {t}", "%Y-%m-%d %H:%M")
+                        if abs((appt - target).total_seconds()) > 300: continue
+                        cid = int(p["Chat ID"]["rich_text"][0]["text"]["content"])
+                        name = p["├Р┬Ъ├Р┬╗├Р┬╕├Р┬╡├Р┬╜├С┬В"]["title"][0]["text"]["content"]
+                        master = p["├Р┬Ь├Р┬░├С┬Б├С┬В├Р┬╡├С┬А"]["select"]["name"]
+                        service = p["├Р┬г├С┬Б├Р┬╗├С┬Г├Р┬│├Р┬░"]["select"]["name"]
+                        msg = (f"├в┬П┬░ *├Р┬Э├Р┬░├Р┬┐├Р┬╛├Р┬╝├Р┬╕├Р┬╜├Р┬░├Р┬╜├Р┬╕├Р┬╡*\n├Р┬Ч├Р┬░├Р┬▓├С┬В├С┬А├Р┬░ ├Р┬▓ *{t}* ├Р┬╢├Р┬┤├С┬С├Р┬╝ ├Р┬Т├Р┬░├С┬Б, {name}!\n├в┬Ь┬В├п┬╕┬П {service} | {master} ├░┬Я┬Т┬л"
+                               if hrs == 24 else
+                               f"├░┬Я┬Ф┬Ф *├Р┬Э├Р┬░├Р┬┐├Р┬╛├Р┬╝├Р┬╕├Р┬╜├Р┬░├Р┬╜├Р┬╕├Р┬╡*\n├Р┬Т├Р┬╕├Р┬╖├Р┬╕├С┬В *├С┬З├Р┬╡├С┬А├Р┬╡├Р┬╖ 2 ├С┬З├Р┬░├С┬Б├Р┬░* ├Р┬▓ *{t}*!\n├в┬Ь┬В├п┬╕┬П {service} | {master} ├░┬Я┬Т┬л")
+                        bot.send_message(cid, msg, parse_mode="Markdown")
+                        notified.add((pid, lbl))
+                    except: pass
+        except: pass
+        time.sleep(60)
+
+# ============================================================
+# ├Р┬Р├Р┬Ф├Р┬Ь├Р┬Ш├Р┬Э ├Р┬Я├Р┬Р├Р┬Э├Р┬Х├Р┬Ы├Р┬м
+# ============================================================
+@bot.message_handler(commands=["admin"])
+def cmd_admin(message):
+    if message.chat.id not in ADMIN_IDS:
+        return bot.send_message(message.chat.id, "├░┬Я┬Ъ┬л ├Р┬Ф├Р┬╛├С┬Б├С┬В├С┬Г├Р┬┐ ├Р┬╖├Р┬░├Р┬┐├С┬А├Р┬╡├С┬Й├С┬С├Р┬╜.")
+    mk = types.InlineKeyboardMarkup()
+    mk.add(types.InlineKeyboardButton("├░┬Я┬У┬К ├Р┬б├С┬В├Р┬░├С┬В├Р┬╕├С┬Б├С┬В├Р┬╕├Р┬║├Р┬░",  callback_data="ADM|stats"))
+    bot.send_message(message.chat.id, "├░┬Я┬С┬С *├Р┬Р├Р┬┤├Р┬╝├Р┬╕├Р┬╜-├Р┬┐├Р┬░├Р┬╜├Р┬╡├Р┬╗├С┬М*", reply_markup=mk, parse_mode="Markdown")
+
+# ============================================================
+# ├Р┬Ч├Р┬Р├Р┬Я├Р┬г├Р┬б├Р┬Ъ
+# ============================================================
+if __name__ == "__main__":
+    print("├░┬Я┬Ъ┬А ├Р┬С├Р┬╛├С┬В ├Р┬╖├Р┬░├Р┬┐├С┬Г├С┬Й├Р┬╡├Р┬╜! ├Р┬Ю├Р┬╢├Р┬╕├Р┬┤├Р┬░├Р┬╜├Р┬╕├Р┬╡ ├С┬Б├Р┬╛├Р┬╛├Р┬▒├С┬Й├Р┬╡├Р┬╜├Р┬╕├Р┬╣...")
+    threading.Thread(target=_reminders, daemon=True).start()
+    threading.Thread(target=auto_status_manager, daemon=True).start()
+    bot.infinity_polling(skip_pending=True)
+
+
+=== config.py (1642 chars) ===
+# config.py
+
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# ============================================================
+# ├Р┬в├Р┬Ю├Р┬Ъ├Р┬Х├Р┬Э├Р┬л ├Р┬Ш ├Р┬Ф├Р┬Ю├Р┬б├Р┬в├Р┬г├Р┬Я├Р┬л (├Р┬Ч├Р┬░├Р┬│├С┬А├С┬Г├Р┬╢├Р┬░├С┬О├С┬В├С┬Б├С┬П ├Р┬╕├Р┬╖ .env)
+# ============================================================
+API_TOKEN    = os.getenv('API_TOKEN')
+NOTION_TOKEN = os.getenv('NOTION_TOKEN')
+DATABASE_ID  = os.getenv('DATABASE_ID')
+
+# ============================================================
+# ├Р┬Э├Р┬Р├Р┬б├Р┬в├Р┬а├Р┬Ю├Р┬Щ├Р┬Ъ├Р┬Ш ├Р┬С├Р┬Ш├Р┬Ч├Р┬Э├Р┬Х├Р┬б-├Р┬Ы├Р┬Ю├Р┬У├Р┬Ш├Р┬Ъ├Р┬Ш
+# ============================================================
+ADMIN_ID  = 8620175706 # <--- ├Р┬Т├Р┬┐├Р┬╕├С┬И├Р┬╕├С┬В├Р┬╡ ├С┬Б├С┬О├Р┬┤├Р┬░ ├Р┬░├Р┬║├С┬В├С┬Г├Р┬░├Р┬╗├С┬М├Р┬╜├С┬Л├Р┬╣ ID ├Р┬░├Р┬┤├Р┬╝├Р┬╕├Р┬╜├Р┬╕├С┬Б├С┬В├С┬А├Р┬░├С┬В├Р┬╛├С┬А├Р┬░
+ADMIN_IDS = [8620175706]
+
+SPECIALIZATIONS = {
+    "├░┬Я┬Т┬З├в┬А┬Н├в┬Щ┬А├п┬╕┬П ├Р┬Т├Р┬╛├Р┬╗├Р┬╛├С┬Б├С┬Л":       {"services": ["├Р┬б├С┬В├С┬А├Р┬╕├Р┬╢├Р┬║├Р┬░", "├Р┬Ю├Р┬║├С┬А├Р┬░├С┬И├Р┬╕├Р┬▓├Р┬░├Р┬╜├Р┬╕├Р┬╡"],  "masters": ["├Р┬Р├Р┬╜├Р┬╜├Р┬░", "├Р┬Ь├Р┬░├С┬А├Р┬╕├С┬П", "├Р┬Ш├Р┬▓├Р┬░├Р┬╜"]},
+    "├░┬Я┬Т┬Е ├Р┬Э├Р┬╛├Р┬│├С┬В├Р┬╕":           {"services": ["├Р┬Ь├Р┬░├Р┬╜├Р┬╕├Р┬║├С┬О├С┬А", "├Р┬Я├Р┬╡├Р┬┤├Р┬╕├Р┬║├С┬О├С┬А"],      "masters": ["├Р┬Ю├Р┬╗├С┬М├Р┬│├Р┬░"]},
+    "├░┬Я┬Т┬Ж├в┬А┬Н├в┬Щ┬А├п┬╕┬П ├Р┬Ъ├Р┬╛├С┬Б├Р┬╝├Р┬╡├С┬В├Р┬╛├Р┬╗├Р┬╛├Р┬│├Р┬╕├С┬П": {"services": ["├Р┬з├Р┬╕├С┬Б├С┬В├Р┬║├Р┬░ ├Р┬╗├Р┬╕├С┬Ж├Р┬░", "├Р┬Я├Р┬╕├Р┬╗├Р┬╕├Р┬╜├Р┬│"],   "masters": ["├Р┬Х├Р┬╗├Р┬╡├Р┬╜├Р┬░"]},
+}
+
+PRICES = {
+    "├Р┬б├С┬В├С┬А├Р┬╕├Р┬╢├Р┬║├Р┬░": 1500, "├Р┬Ю├Р┬║├С┬А├Р┬░├С┬И├Р┬╕├Р┬▓├Р┬░├Р┬╜├Р┬╕├Р┬╡": 4000,
+    "├Р┬Ь├Р┬░├Р┬╜├Р┬╕├Р┬║├С┬О├С┬А": 1200, "├Р┬Я├Р┬╡├Р┬┤├Р┬╕├Р┬║├С┬О├С┬А":     1400,
+    "├Р┬з├Р┬╕├С┬Б├С┬В├Р┬║├Р┬░ ├Р┬╗├Р┬╕├С┬Ж├Р┬░": 2500, "├Р┬Я├Р┬╕├Р┬╗├Р┬╕├Р┬╜├Р┬│":  2000,
+}
+
+LOYALTY = {3: 5, 5: 10, 10: 15}  # ├Р┬▓├Р┬╕├Р┬╖├Р┬╕├С┬В├Р┬╛├Р┬▓ -> ├С┬Б├Р┬║├Р┬╕├Р┬┤├Р┬║├Р┬░ %
+
+MASTERS_CHAT_IDS = {
+    "├Р┬Р├Р┬╜├Р┬╜├Р┬░": 8620175706, "├Р┬Ь├Р┬░├С┬А├Р┬╕├С┬П": 8620175706, "├Р┬Ш├Р┬▓├Р┬░├Р┬╜": 8620175706,
+    "├Р┬Ю├Р┬╗├С┬М├Р┬│├Р┬░": 8620175706, "├Р┬Х├Р┬╗├Р┬╡├Р┬╜├Р┬░": 8620175706,
+}
+
+TIME_SLOTS = [
+    "10:00", "11:00", "12:00", "13:00", "14:00",
+    "15:00", "16:00", "17:00", "18:00", "19:00"
+]
+
