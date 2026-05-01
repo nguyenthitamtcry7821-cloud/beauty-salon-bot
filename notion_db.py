@@ -87,18 +87,11 @@ def save_booking(data: dict, page_id=None) -> str:
 
 def get_catalog() -> dict:
     catalog = {"categories": []}
-    for cat_name, info in SPECIALIZATIONS.items():
+    for cat_name, cat_data in SPECIALIZATIONS.items():
         services = []
-        for sname in info["services"]:
-            services.append({
-                "name": sname,
-                "price": PRICES.get(sname, 0)
-            })
-        catalog["categories"].append({
-            "name": cat_name,
-            "services": services,
-            "masters": info["masters"]
-        })
+        for svc in cat_data["services"]:
+            services.append({"name": svc, "price": PRICES.get(svc, 0)})
+        catalog["categories"].append({"name": cat_name, "services": services})
     return catalog
 
 def auto_close_past_bookings():
